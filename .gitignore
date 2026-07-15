@@ -1,0 +1,13 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local Claude Code settings (machine-specific paths, not for sharing)
+.claude/settings.local.json
+
+# OS cruft
+.DS_Store
+Thumbs.db
