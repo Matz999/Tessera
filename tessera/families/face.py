@@ -97,8 +97,9 @@ def sample_params(rng) -> dict:
     return p
 
 
-def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np.ndarray:
-    rng = rng_for(seed)
+def fields(params: dict, size: int, gray: bool, rng):
+    """Pre-render fields (height, tone, spec_mask, emit, albedo) for the mixer.
+    emit is the eye glow; albedo is None (tone-ramped, single material)."""
     X, Y = grid_coords(size, centered=True)   # [-1,1], Y increases downward
     p = params
 
@@ -161,5 +162,11 @@ def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np
     # eyes glow when emission is on (concentrated on the pupil)
     eye_glow = norm01(pupil_mask + 0.3 * eye)
 
-    return render_material(h, tone, p, rng, gray, spec_mask=spec_mask,
-                           ao_radii=(3, 8, 20), emit_source=eye_glow)
+    return h, tone, spec_mask, eye_glow, None
+
+
+def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np.ndarray:
+    rng = rng_for(seed)
+    h, tone, sm, emit, alb = fields(params, size, gray, rng)
+    return render_material(h, tone, params, rng, gray, spec_mask=sm,
+                           ao_radii=(3, 8, 20), emit_source=emit, albedo=alb)

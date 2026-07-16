@@ -60,6 +60,28 @@ def render_batch(family: str, count: int, size: int, gray: bool, base_seed: int,
     return entries
 
 
+def render_genome(family: str, params: dict, seed: int, size: int, gray: bool,
+                  outdir: str, ss: int = 2) -> dict:
+    """Render one tile from an explicit, fully-specified param genome (no
+    sample_params) — the breeding path. Same on-disk contract as render_batch."""
+    mod = FAMILIES[family]
+    params = dict(params)
+    ss = max(int(ss), 1)
+    h = param_hash(params)
+    suffix = ".g" if gray else ""
+    name = f"{seed:06d}_{h}{suffix}.png"
+    fam_dir = os.path.join(outdir, family)
+    os.makedirs(fam_dir, exist_ok=True)
+    path = os.path.join(fam_dir, name)
+    if not os.path.exists(path):
+        arr = mod.generate(seed, params, size=size * ss, gray=gray)
+        if ss > 1:
+            arr = downscale(arr, size)
+        save_tile(arr, path, family, seed, params)
+    return {"family": family, "seed": seed, "hash": h, "gray": gray,
+            "file": f"{family}/{name}", "params": params}
+
+
 def render_normals(outdir: str, size: int = 512, ss: int = 2) -> None:
     """Regenerate every manifest tile and save its normal map as <name>.n.png
     (the WebGL relight shader in the app consumes these)."""
@@ -105,8 +127,8 @@ def write_manifest(outdir: str, rescan: bool = False) -> str:
     tiles = []
     for fam in sorted(os.listdir(outdir)):
         fam_dir = os.path.join(outdir, fam)
-        if not os.path.isdir(fam_dir):
-            continue
+        if not os.path.isdir(fam_dir) or fam.startswith("_"):
+            continue  # skip asset dirs like _stamps (uploaded stamp images)
         for name in sorted(os.listdir(fam_dir)):
             if not name.endswith(".png") or name.endswith(".n.png"):
                 continue
@@ -153,6 +175,9 @@ def main():
     ap.add_argument("--normals", action="store_true",
                     help="export .n.png normal maps for every manifest tile")
     args = ap.parse_args()
+
+    from .core.stamp import set_store
+    set_store(args.out)  # resolve stamp-family image assets under <out>/_stamps
 
     if args.manifest_only:
         write_manifest(args.out, rescan=args.rescan)

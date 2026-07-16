@@ -34,6 +34,14 @@ TEMPLATE = """<!DOCTYPE html>
   button.gen { background:#26c; border-color:#26c; color:#fff; }
   label.chk { display:flex; gap:5px; align-items:center; cursor:pointer; user-select:none; }
   #genbar { display:none; }
+  #stampbar { display:none; }
+  #breedbar { display:none; }
+  #breedMode.on { background:#b3a; border-color:#b3a; color:#fff; }
+  .dial-mini { display:flex; gap:6px; align-items:center; font-size:12px; color:#999; }
+  .dial-mini input[type=range] { width:88px; accent-color:#b3a; }
+  #glyphControls, #imageControls { display:inline-flex; gap:8px; align-items:center; }
+  #glyphSamples span { cursor:pointer; padding:0 2px; opacity:.8; }
+  #glyphSamples span:hover { opacity:1; transform:scale(1.15); }
   #status { color:#8ac; font-variant-numeric:tabular-nums; }
   #dials { display:none; max-height:44vh; overflow-y:auto; padding:6px 16px 12px;
            border-top:1px solid #222; }
@@ -76,6 +84,11 @@ TEMPLATE = """<!DOCTYPE html>
           line-height:1; opacity:0; transition:opacity .15s; }
   .cell:hover .del { opacity:1; }
   .cell.new .del { top:26px; }  /* keep clear of the NEW badge */
+  .cell.parent { box-shadow: inset 0 0 0 4px #d5f; }
+  .cell.parent::after { content:"\\2665"; position:absolute; top:6px; right:8px;
+          background:#d5f; color:#fff; border-radius:50%; width:22px; height:22px;
+          display:grid; place-items:center; font-size:12px; }
+  .cell.parent.blessed::after { content:"\\2713"; background:#3c5; }
   .count { color:#3c5; font-weight:600; }
 </style></head><body>
 <header>
@@ -112,6 +125,36 @@ TEMPLATE = """<!DOCTYPE html>
     <button class="gen" id="genBtn">Generate</button>
     <span id="status"></span>
   </div>
+  <div class="bar" id="stampbar">
+    <b style="color:#8ac">Stamp</b>
+    <select id="stampSrc">
+      <option value="glyph">glyph</option><option value="image">image</option>
+    </select>
+    <span id="glyphControls">
+      <select id="stampFont"></select>
+      <input id="stampGlyph" type="text" value="&#9786;" style="width:52px"
+             title="type or paste a character / emoji">
+      <span id="glyphSamples" style="font-size:20px; line-height:1;"></span>
+    </span>
+    <span id="imageControls" style="display:none; gap:8px; align-items:center;">
+      <input type="file" id="stampFile" accept="image/*" style="width:auto">
+      <img id="stampPreview" alt="" style="height:30px; border-radius:4px; display:none">
+      <span id="stampImgName" style="color:#888; font-size:12px;"></span>
+    </span>
+  </div>
+  <div class="bar" id="breedbar">
+    <b style="color:#d5f">Breed</b>
+    <button id="breedMode">select parents: off</button>
+    <span class="count" id="parentCount" style="color:#d5f">0 parents</span>
+    <button id="clearParents">clear</button>
+    <label class="dial-mini">mutation <input id="breedMut" type="range" min="0" max="1"
+           step="0.01" value="0.2"><span id="breedMutV">0.20</span></label>
+    <label class="dial-mini">blend <input id="breedBlend" type="range" min="0" max="1"
+           step="0.01" value="0.5"><span id="breedBlendV">0.50</span></label>
+    <label class="chk">count <input id="breedCount" type="number" min="1" max="16" value="6"></label>
+    <button class="gen" id="breedBtn" style="background:#b3a; border-color:#b3a">Breed &#8594;</button>
+    <span id="breedStatus" style="color:#c9c;"></span>
+  </div>
   <div id="dials">
     <div class="grid2" id="famDialGrid"></div>
     <div class="grid2" id="dialGrid"></div>
@@ -126,6 +169,13 @@ const KEY = "cram_blessed_tiles";
 let blessed = new Set(JSON.parse(localStorage.getItem(KEY) || "[]"));
 const newFiles = new Set();
 const $ = id => document.getElementById(id);
+
+// ---- breeding: parents = selected genomes; breedMode swaps click semantics ----
+const parents = new Set();   // file ids chosen as breeding parents
+let breedMode = false;
+function updateParentUI() {
+  $("parentCount").textContent = parents.size + " parent" + (parents.size === 1 ? "" : "s");
+}
 
 function populateFilters() {
   const sel = $("famFilter"), cur = sel.value;
@@ -157,7 +207,8 @@ function render() {
     if (bf === "unblessed" && blessed.has(t.file)) continue;
     const cell = document.createElement("div");
     cell.className = "cell" + (blessed.has(t.file) ? " blessed" : "")
-                            + (newFiles.has(t.file) ? " new" : "");
+                            + (newFiles.has(t.file) ? " new" : "")
+                            + (parents.has(t.file) ? " parent" : "");
     const img = document.createElement("img");
     img.loading = "lazy"; img.src = t.file;
     const tag = document.createElement("div");
@@ -172,8 +223,13 @@ function render() {
       cell.appendChild(del);
     }
     cell.onclick = () => {
-      blessed.has(t.file) ? blessed.delete(t.file) : blessed.add(t.file);
-      cell.classList.toggle("blessed"); save();
+      if (breedMode) {
+        parents.has(t.file) ? parents.delete(t.file) : parents.add(t.file);
+        cell.classList.toggle("parent"); updateParentUI();
+      } else {
+        blessed.has(t.file) ? blessed.delete(t.file) : blessed.add(t.file);
+        cell.classList.toggle("blessed"); save();
+      }
     };
     grid.appendChild(cell);
   }
@@ -274,13 +330,65 @@ function buildFamilyDials(family) {
   updateDialsBtn();
 }
 
+// ---- stamp source (only shown for the `stamp` family) ----
+let stampImage = "";   // current uploaded stamp id (source=image)
+
+function buildFontSamples() {
+  const fonts = STAMPFONTS || [];
+  const f = fonts.find(x => x.id === $("stampFont").value) || {};
+  const box = $("glyphSamples"); box.innerHTML = "";
+  [...(f.samples || "")].forEach(ch => {
+    const s = document.createElement("span");
+    s.textContent = ch; s.title = "use " + ch;
+    s.onclick = () => { $("stampGlyph").value = ch; };
+    box.appendChild(s);
+  });
+}
+
+let STAMPFONTS = null;
+function initStamp() {
+  fetch("/api/fonts").then(r => r.json()).then(fonts => {
+    STAMPFONTS = fonts;
+    const sel = $("stampFont");
+    fonts.forEach(f => { const o = document.createElement("option");
+                         o.value = f.id; o.textContent = f.label; sel.appendChild(o); });
+    buildFontSamples();
+  });
+  $("stampFont").onchange = buildFontSamples;
+  $("stampSrc").onchange = () => {
+    const img = $("stampSrc").value === "image";
+    $("glyphControls").style.display = img ? "none" : "inline-flex";
+    $("imageControls").style.display = img ? "inline-flex" : "none";
+  };
+  $("stampFile").onchange = async () => {
+    const file = $("stampFile").files[0];
+    if (!file) return;
+    const data = await new Promise(res => {
+      const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(file);
+    });
+    $("status").textContent = "uploading stamp\\u2026";
+    const r = await fetch("/api/upload", { method: "POST", body: JSON.stringify({data}) });
+    const out = await r.json();
+    if (!r.ok) { $("status").textContent = "upload failed: " + (out.error || r.statusText); return; }
+    stampImage = out.id;
+    const prev = $("stampPreview"); prev.src = data; prev.style.display = "inline";
+    $("stampImgName").textContent = out.id;
+    $("status").textContent = "stamp ready \\u2014 hit Generate";
+  };
+}
+
+function toggleStampBar() {
+  $("stampbar").style.display = $("genFam").value === "stamp" ? "flex" : "none";
+}
+
 async function deleteTile(t, cell) {
   const r = await fetch("/api/delete", { method: "POST",
                                          body: JSON.stringify({file: t.file}) });
   const data = await r.json();
   if (!r.ok) { $("status").textContent = "error: " + (data.error || r.statusText); return; }
   MANIFEST = MANIFEST.filter(x => x.file !== t.file);
-  blessed.delete(t.file); newFiles.delete(t.file); save();
+  blessed.delete(t.file); newFiles.delete(t.file); parents.delete(t.file);
+  updateParentUI(); save();
   populateFilters();
   cell.remove();  // no full re-render: keeps scroll position while culling
   $("status").textContent = "deleted " + t.file;
@@ -298,6 +406,16 @@ async function generate() {
   const s = $("genSeed").value.trim();
   if (s) body.seed = +s;
   const ov = Object.assign({}, pinned, familyPinned);  // panel first, raw JSON wins ties
+  if (body.family === "stamp") {
+    ov.stamp_source = $("stampSrc").value;
+    if (ov.stamp_source === "image") {
+      if (!stampImage) { $("status").textContent = "upload a stamp image first"; return; }
+      ov.stamp_image = stampImage;
+    } else {
+      ov.stamp_glyph = $("stampGlyph").value || "?";
+      ov.stamp_font = $("stampFont").value;
+    }
+  }
   const raw = $("genOv").value.trim();
   if (raw) {
     try { Object.assign(ov, JSON.parse(raw)); }
@@ -324,6 +442,48 @@ async function generate() {
     $("genBtn").disabled = false;
   }
 }
+
+async function breed() {
+  const picked = MANIFEST.filter(t => parents.has(t.file))
+      .map(t => ({family: t.family, seed: t.seed, params: t.params}));
+  if (!picked.length) {
+    $("breedStatus").textContent = "toggle 'select parents', then click tiles to pick parents";
+    return;
+  }
+  const body = { parents: picked, count: +$("breedCount").value || 6,
+                 size: +$("genSize").value, gray: $("genGray").checked,
+                 ss: +$("genSS").value, mutation: +$("breedMut").value,
+                 blend: +$("breedBlend").value };
+  $("breedBtn").disabled = true;
+  const t0 = Date.now();
+  const tick = setInterval(() => { $("breedStatus").textContent =
+      "breeding " + body.count + " from " + picked.length + " parents\\u2026 "
+      + ((Date.now() - t0) / 1000).toFixed(0) + "s"; }, 250);
+  try {
+    const r = await fetch("/api/breed", { method: "POST", body: JSON.stringify(body) });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error || r.statusText);
+    d.tiles.forEach(t => newFiles.add(t.file));
+    await refreshManifest();
+    $("breedStatus").textContent = "bred " + d.tiles.length + " in "
+        + ((Date.now() - t0) / 1000).toFixed(1) + "s";
+  } catch (e) {
+    $("breedStatus").textContent = "error: " + e.message;
+  } finally {
+    clearInterval(tick);
+    $("breedBtn").disabled = false;
+  }
+}
+
+$("breedMode").onclick = () => {
+  breedMode = !breedMode;
+  $("breedMode").classList.toggle("on", breedMode);
+  $("breedMode").textContent = "select parents: " + (breedMode ? "on" : "off");
+};
+$("clearParents").onclick = () => { parents.clear(); updateParentUI(); render(); };
+$("breedBtn").onclick = breed;
+$("breedMut").oninput = () => $("breedMutV").textContent = (+$("breedMut").value).toFixed(2);
+$("breedBlend").oninput = () => $("breedBlendV").textContent = (+$("breedBlend").value).toFixed(2);
 
 $("export").onclick = async () => {
   const out = MANIFEST.filter(t => blessed.has(t.file))
@@ -354,15 +514,18 @@ $("dialsBtn").onclick = () => {
 
 if (SERVED) {
   $("genbar").style.display = "flex";
+  $("breedbar").style.display = "flex";
   $("export").textContent = "Save blessed.json";
-  $("genFam").onchange = () => buildFamilyDials($("genFam").value);
+  $("genFam").onchange = () => { buildFamilyDials($("genFam").value); toggleStampBar(); };
   fetch("/api/families").then(r => r.json()).then(fams => {
     fams.forEach(f => {
       const o = document.createElement("option"); o.value = o.textContent = f;
       $("genFam").appendChild(o);
     });
     buildDials();  // after genFam has options, so the family group matches selection
+    toggleStampBar();
   });
+  initStamp();
   refreshManifest();
 }
 populateFilters(); save(); render();

@@ -90,8 +90,9 @@ def _pack(N, rng, passes):
     return blocks
 
 
-def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np.ndarray:
-    rng = rng_for(seed)
+def fields(params: dict, size: int, gray: bool, rng):
+    """Pre-render fields (height, tone, spec_mask, emit, albedo) for the mixer.
+    albedo is the authored thin-film color; emit is None (a die has no emitters)."""
     X, Y = coords(size)
     N = params["grid"]
     cell = size / N
@@ -165,5 +166,11 @@ def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np
     # --- spec: metal shiny, oxide matte ---
     sm = np.clip(0.35 + 0.65 * metal - 0.3 * channel, 0.05, 1.0)
 
-    return render_material(h, metal, params, rng, gray, spec_mask=sm,
-                           ao_radii=(2, 5, 12), albedo=alb)
+    return h, metal, sm, None, alb
+
+
+def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np.ndarray:
+    rng = rng_for(seed)
+    h, tone, sm, emit, alb = fields(params, size, gray, rng)
+    return render_material(h, tone, params, rng, gray, spec_mask=sm,
+                           ao_radii=(2, 5, 12), emit_source=emit, albedo=alb)

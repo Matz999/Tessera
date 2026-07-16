@@ -78,8 +78,9 @@ def sample_params(rng) -> dict:
     return p
 
 
-def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np.ndarray:
-    rng = rng_for(seed)
+def fields(params: dict, size: int, gray: bool, rng):
+    """Pre-render fields (height, tone, spec_mask, emit, albedo) for the mixer.
+    albedo is the authored board color; emit is the LED pads."""
     X, Y = coords(size)
     N = params["grid"]
     cell = size / N
@@ -189,5 +190,11 @@ def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np
     sm = over(sm, silk, 0.15)
     sm = over(sm, holes, 0.08)
 
-    return render_material(h, metal, params, rng, gray, spec_mask=sm,
-                           ao_radii=(2, 6, 16), emit_source=leds, albedo=alb)
+    return h, metal, sm, leds, alb
+
+
+def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np.ndarray:
+    rng = rng_for(seed)
+    h, tone, sm, emit, alb = fields(params, size, gray, rng)
+    return render_material(h, tone, params, rng, gray, spec_mask=sm,
+                           ao_radii=(2, 6, 16), emit_source=emit, albedo=alb)

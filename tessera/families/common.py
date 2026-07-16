@@ -104,6 +104,18 @@ def pick_ramp(params: dict, gray: bool) -> str:
     return params.get("ramp", "pewter")
 
 
+def ramp_albedo(tone: np.ndarray, params: dict, gray: bool) -> np.ndarray:
+    """tone field -> RGB albedo: rank-equalize (so every tile spans the full
+    ramp, no mud-dark tiles) then map through the palette ramp. Shared by
+    render_material and the wildcard mixer (which ramps tone-based families
+    itself before blending)."""
+    flat = tone.ravel()
+    ranks = np.empty(flat.size)
+    ranks[np.argsort(flat, kind="stable")] = np.linspace(0.0, 1.0, flat.size)
+    t = np.clip(0.55 * tone + 0.45 * ranks.reshape(tone.shape), 0.0, 1.0)
+    return apply_ramp(t, pick_ramp(params, gray))
+
+
 def render_material(height: np.ndarray, tone: np.ndarray, params: dict, rng,
                     gray: bool, spec_mask=None, ao_radii=(3, 9, 24),
                     do_finish: bool = True, emit_source=None, albedo=None) -> np.ndarray:
@@ -125,12 +137,7 @@ def render_material(height: np.ndarray, tone: np.ndarray, params: dict, rng,
     global LAST_NORMALS
 
     if albedo is None:
-        # rank-equalize tone so every tile spans the full ramp (no mud-dark tiles)
-        flat = tone.ravel()
-        ranks = np.empty(flat.size)
-        ranks[np.argsort(flat, kind="stable")] = np.linspace(0.0, 1.0, flat.size)
-        tone = np.clip(0.55 * tone + 0.45 * ranks.reshape(tone.shape), 0.0, 1.0)
-        albedo = apply_ramp(tone, pick_ramp(params, gray))
+        albedo = ramp_albedo(tone, params, gray)
     else:
         albedo = np.clip(albedo, 0.0, 1.0)
         if gray:

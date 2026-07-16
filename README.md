@@ -115,18 +115,81 @@ Renders are supersampled 2x by default for anti-aliasing (`--ss` / the AA
 select in the UI; use 1x for quick drafts or reaction_diffusion, whose sim
 cost grows fast with resolution).
 
+## Breeding loop (curation that drives generation)
+
+Random sampling has a low hit rate and the 60-dial space is impossible to
+hand-drive. Instead, **breed** from what you like: every tile's params are a
+genome (seed seeds only the noise), so you select favorites and the next batch
+is crossover + mutation of their genomes, not a fresh random sweep. Over a few
+generations the library converges toward your eye.
+
+In the served UI, the **Breed** bar:
+
+1. Click **select parents: on**, then click tiles to tag them as parents (they
+   get a magenta ♥ border). Click again to unpick; **clear** resets. Toggle the
+   mode off to go back to blessing.
+2. Set **mutation** (0 = offspring hug the parents / refine; ~0.5 = wander far /
+   explore) and **blend** (chance a numeric gene interpolates between two parents
+   vs. inheriting one whole), pick a **count**, hit **Breed →**. Offspring appear
+   at the top with NEW badges; select the best of them as the next generation.
+
+Breeding happens **within a gene pool** — same family, and for `wildcard` the
+same `_sub` generator (a truchet genome is meaningless to silicon). A mixed
+selection is grouped and bred pool-by-pool, offspring spread round-robin. A
+single parent breeds asexually (mutation only — "give me variations of this
+one"). Ranges/choices come from the same DIALS the panel uses, so mutation stays
+in-gamut. The genetics live in `tessera/breed.py`; API: `POST /api/breed`
+`{parents:[{family,seed,params}], count, mutation, blend, size, gray, ss}`.
+
 ## Families
 
-emblem, quasicrystal, truchet, girih, reaction_diffusion (slow — real
-Gray-Scott sim), voronoi, mandala, goo (metaball neon slime — glows via the
-emissive channel), pcb (routed circuit board — copper traces, ICs, vias,
-silkscreen; LEDs drive the glow), silicon (die shot — packed memory/logic/pad
-blocks, bus channels, cyclic thin-film interference color), face (carved
-ceremonial mask / idol — bilaterally-symmetric brow, eyes, nose, mouth sculpted
-from smooth Gaussian bumps on a raised plate; eyes drive the glow, so pin
-`emission` for a glowing-eyed idol). Each lives in
+emblem, quasicrystal, girih, reaction_diffusion (slow — real Gray-Scott sim),
+voronoi, mandala, goo (metaball neon slime — glows via the emissive channel),
+stamp (emboss a **font glyph or an uploaded image** into the tile — carved
+stone reliefs, stamped metal plaques, glowing neon emblems, repeating motifs;
+see below), and wildcard (a **fusion** of the pruned generators — `truchet`, `face`,
+`silicon`, `pcb` — carved into one material; see below). Each lives in
 `tessera/families/<name>.py` with `sample_params()` (the sweep) and
 `generate(seed, params, size, gray)`.
+
+### The wildcard family (fused generators)
+
+Not a selector — a blender. Each of truchet / face / silicon / pcb exposes its
+pre-lighting `fields()` (height, tone, spec, glow); wildcard assigns smooth
+regions via softmax over per-generator large-scale noise (each dominates its own
+zones, cross-fading at the borders), fuses the height + tone, and runs **one**
+lighting pass — so a tile is a single carved substrate where truchet's labyrinth
+weave flows into silicon's die blocks into a face emboss into PCB traces (LEDs /
+eyes still glow). The authored silicon/pcb colors give way to the tile's own
+material + ramp, so it reads as one coherent panel, not a four-image collage.
+Dials: `mix_truchet` / `mix_face` / `mix_silicon` / `mix_pcb` (bias 0 = off),
+`mix_sharp` (border hardness), `mix_scale` (region size) — all breedable, so you
+can evolve toward "more silicon, less truchet". Fusing 2–4 full generators is
+costly, so the mixer caps its internal work at 512px and upscales (it's soft by
+nature); ~10–15s/tile. Best rendered at AA 1×.
+
+### The stamp family (glyphs + your own images)
+
+Pick `stamp` in the Generate bar and a **Stamp** strip appears:
+
+- **glyph** — choose a font (emoji 🐱💀🌳, symbols ☠☯, Wingdings/Webdings
+  silhouettes, Segoe icons, Impact letters) and type/paste a character, or click
+  one from the sample palette. Fully reproducible from `(stamp_glyph, stamp_font)`.
+- **image** — upload any picture; it's stored content-addressed under
+  `library/_stamps/<hash>.png` and embossed into the tile (alpha is respected,
+  so transparent logos cut cleanly; opaque photos become a carved relief).
+
+The shape is read into the shared material stack as *geometry* (relief lighting,
+cast shadow, AO carry it — it reads as carved, not a flat sticker). Family dials:
+`stamp_arrange` (single / grid / brick / scatter), `stamp_scale`, `stamp_grid` /
+`stamp_count`, `stamp_rotate` (+ jitters), `stamp_emboss` (signed: raised vs
+engraved), `stamp_bevel`, `stamp_lum_detail` (how much the image/emoji interior
+carves), `stamp_threshold` / `stamp_edge_only` (outline mode) / `stamp_invert`,
+`stamp_tone` / `stamp_spec` (inlay tint & gloss), and the ground (`bg_tone`,
+`tone_relief`, `bg_tex`, `bg_freq`, `bg_spec`). Pin `emission` for a neon emblem
+(the glow follows the outline + bright features). Every arrangement tiles
+seamlessly (instances composite with toroidal wrap). API: `POST /api/upload`
+`{data}` → `{id}`; `GET /api/fonts` lists installed stamp fonts.
 
 The dial panel is **family-aware**: on top of the shared render dials it shows a
 `family: <name>` group with that family's own params (pcb `soldermask`/`finish`/

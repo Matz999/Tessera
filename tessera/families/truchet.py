@@ -51,8 +51,10 @@ def _cell_arcs(rng, x0, y0, c, depth, subdiv_p, out):
         out.append((cx, cy, c / 2, x0, y0, c))
 
 
-def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np.ndarray:
-    rng = rng_for(seed)
+def fields(params: dict, size: int, gray: bool, rng):
+    """Pre-render fields (height, tone, spec_mask, emit, albedo) — lets the
+    wildcard mixer blend this generator with others before a single lighting
+    pass. spec/emit/albedo are None (truchet is single-material, tone-ramped)."""
     g = params["grid"]
     c = size / g
     arcs = []
@@ -87,4 +89,11 @@ def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np
     height = norm01(gaussian_blur(height, size * 0.0015))
 
     tone = norm01(0.35 + cord * 0.55 + (fbm(size, rng, octaves=4, freq=6) - 0.5) * 0.12)
-    return render_material(height, tone, params, rng, gray, ao_radii=(2, 6, 16))
+    return height, tone, None, None, None
+
+
+def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np.ndarray:
+    rng = rng_for(seed)
+    height, tone, sm, emit, alb = fields(params, size, gray, rng)
+    return render_material(height, tone, params, rng, gray, spec_mask=sm,
+                           ao_radii=(2, 6, 16), emit_source=emit, albedo=alb)
