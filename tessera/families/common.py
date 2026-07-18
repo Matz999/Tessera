@@ -6,6 +6,7 @@ from ..core.emissive import (EMISSION_COLORS, EMISSION_SOURCES, emission_rgb,
 from ..core.finish import finish
 from ..core.grain import GRAINS, apply_grain
 from ..core.noise import fbm
+from ..core.overlay import apply_overlays
 from ..core.palette import GRAY_RAMPS, apply_ramp
 from ..core.relief import curvature, normals, shade
 from ..core.weather import apply_weather
@@ -90,6 +91,33 @@ DIALS = {
     "bloom":           dict(lo=0.0, hi=0.8, step=0.01, group="finish"),
     "bloom_thresh":    dict(lo=0.4, hi=1.0, step=0.01, group="finish"),
     "chroma":          dict(lo=0.0, hi=3.0, step=0.01, group="finish"),
+    "contrast":        dict(lo=-0.5, hi=1.0, step=0.01, group="finish"),
+    # overlays: atmosphere / generative / photographic flourishes
+    "cloud":           dict(lo=0.0, hi=1.0, step=0.01, group="overlays"),
+    "cloud_freq":      dict(lo=1, hi=6, step=1, group="overlays"),
+    "bokeh":           dict(lo=0.0, hi=1.0, step=0.01, group="overlays"),
+    "bokeh_size":      dict(lo=0.01, hi=0.25, step=0.005, group="overlays"),
+    "soft_focus":      dict(lo=0.0, hi=1.0, step=0.01, group="overlays"),
+    "soft_radius":     dict(lo=0.002, hi=0.06, step=0.002, group="overlays"),
+    "shapes":          dict(lo=0, hi=16, step=1, group="overlays"),
+    "shape_alpha":     dict(lo=0.0, hi=1.0, step=0.01, group="overlays"),
+    "lines":           dict(lo=0, hi=10, step=1, group="overlays"),
+    "line_alpha":      dict(lo=0.0, hi=1.0, step=0.01, group="overlays"),
+    "func_curves":     dict(lo=0, hi=5, step=1, group="overlays"),
+    "glare":           dict(lo=0.0, hi=1.0, step=0.01, group="overlays"),
+    "twinkle":         dict(lo=0, hi=40, step=1, group="overlays"),
+    "dust":            dict(lo=0.0, hi=1.0, step=0.01, group="overlays"),
+    "scratches":       dict(lo=0, hi=16, step=1, group="overlays"),
+    # colour grade + display
+    "duotone":         dict(lo=0.0, hi=1.0, step=0.01, group="grade"),
+    "duo_h1":          dict(lo=0.0, hi=1.0, step=0.01, group="grade"),
+    "duo_h2":          dict(lo=0.0, hi=1.0, step=0.01, group="grade"),
+    "posterize":       dict(lo=0, hi=8, step=1, group="grade"),
+    "halftone":        dict(lo=0.0, hi=1.0, step=0.01, group="grade"),
+    "halftone_cells":  dict(lo=12, hi=120, step=1, group="grade"),
+    "aberration":      dict(lo=0.0, hi=1.0, step=0.01, group="grade"),
+    "scanlines":       dict(lo=0.0, hi=1.0, step=0.01, group="grade"),
+    "scanline_freq":   dict(lo=40, hi=400, step=1, group="grade"),
 }
 
 
@@ -222,6 +250,7 @@ def render_material(height: np.ndarray, tone: np.ndarray, params: dict, rng,
                      emission=emission,
                      bloom_emissive=params.get("bloom_emissive", 1.6),
                      bloom_radius=params.get("bloom_radius", 0.012))
+        img = apply_overlays(img, params, rng, size)
     return img
 
 
@@ -297,6 +326,36 @@ def sample_common(rng) -> dict:
         "bloom": round(float(u(0.05, 0.35)), 3),
         "bloom_thresh": round(float(u(0.68, 0.88)), 3),
         "chroma": round(float(u(0.0, 1.3)), 3),
+        # contrast: biased on (user wants more punch), can go slightly flat too
+        "contrast": round(float(rng.choice([0.0, u(-0.2, 0.0), u(0.15, 0.6), u(0.15, 0.6)])), 3),
+        # overlays — each mostly off, so ~half of tiles stay clean but breeding
+        # has a big new surface. (atmosphere / generative / photographic)
+        "cloud": round(float(rng.choice([0.0, 0.0, 0.0, u(0.15, 0.5)])), 3),
+        "cloud_freq": int(rng.choice([1, 2, 3, 4])),
+        "bokeh": round(float(rng.choice([0.0, 0.0, 0.0, u(0.2, 0.7)])), 3),
+        "bokeh_size": round(float(u(0.04, 0.16)), 3),
+        "soft_focus": round(float(rng.choice([0.0, 0.0, 0.0, u(0.2, 0.6)])), 3),
+        "soft_radius": round(float(u(0.008, 0.03)), 4),
+        "shapes": int(rng.choice([0, 0, 0, 0, rng.integers(2, 10)])),
+        "shape_alpha": round(float(u(0.2, 0.6)), 3),
+        "lines": int(rng.choice([0, 0, 0, 0, rng.integers(1, 6)])),
+        "line_alpha": round(float(u(0.2, 0.6)), 3),
+        "func_curves": int(rng.choice([0, 0, 0, 0, 0, rng.integers(1, 3)])),
+        "glare": round(float(rng.choice([0.0, 0.0, 0.0, u(0.2, 0.6)])), 3),
+        "twinkle": int(rng.choice([0, 0, 0, rng.integers(4, 24)])),
+        "dust": round(float(rng.choice([0.0, 0.0, 0.0, u(0.2, 0.8)])), 3),
+        "scratches": int(rng.choice([0, 0, 0, 0, rng.integers(1, 8)])),
+        # colour grade + display (each mostly off; hues always present so a
+        # duotone/halftone breeds toward any palette)
+        "duotone": round(float(rng.choice([0.0, 0.0, 0.0, u(0.3, 0.85)])), 3),
+        "duo_h1": round(float(u(0.0, 1.0)), 3),
+        "duo_h2": round(float(u(0.0, 1.0)), 3),
+        "posterize": int(rng.choice([0, 0, 0, 0, rng.integers(3, 7)])),
+        "halftone": round(float(rng.choice([0.0, 0.0, 0.0, 0.0, u(0.3, 0.8)])), 3),
+        "halftone_cells": int(rng.choice([24, 36, 48, 72, 96])),
+        "aberration": round(float(rng.choice([0.0, 0.0, 0.0, u(0.2, 0.7)])), 3),
+        "scanlines": round(float(rng.choice([0.0, 0.0, 0.0, 0.0, u(0.3, 0.7)])), 3),
+        "scanline_freq": int(rng.choice([90, 130, 180, 260])),
         # grey-first QA
         "gray_ramp": GRAY_RAMPS[int(rng.integers(len(GRAY_RAMPS)))],
     }

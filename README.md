@@ -109,7 +109,22 @@ family-specific params) and wins ties; the CLI equivalent is
   `_freq`, `weather_cavity_bias` (how strongly corrosion favors recesses).
   Each effect is off at 0 and sampled mostly-off, so ~half of tiles stay clean.
 - **surface** — `ao_strength`, `grain_boost`, `relief`, `material`, `ramp`
-- **finish** — `film_grain`, `vignette`, `bloom`, `bloom_thresh`, `chroma`
+- **finish** — `film_grain`, `vignette`, `bloom`, `bloom_thresh`, `chroma`,
+  `contrast` (S-curve punch, biased on)
+- **overlays** — atmospheric / generative / photographic flourishes layered on
+  every family (`tessera/core/overlay.py`), each off at 0 and sampled mostly-off:
+  `cloud` (+`cloud_freq`, cloudy colour gradient), `bokeh` (+`bokeh_size`,
+  defocused orbs), `soft_focus` (+`soft_radius`, dreamy Orton glow), `shapes`
+  (+`shape_alpha`, random geometry), `lines` (+`line_alpha`, rational-angle line
+  families / hatching), `func_curves` (sine / Lissajous / rose / spiral /
+  spirograph / de Jong attractor plotted directly), `glare` (lens flare +
+  streak), `twinkle` (star sparkles), `dust` (specks), `scratches` (film
+  scratches).
+- **grade** — colour-grade + display effects: `duotone` (+`duo_h1`/`duo_h2`
+  hues, luminance→two-tone), `posterize` (level quantise), `halftone`
+  (+`halftone_cells`, newsprint dots), `aberration` (RGB channel split),
+  `scanlines` (+`scanline_freq`, CRT lines). Everything composites through the
+  seamless wrapped primitives, so tiles stay tileable.
 
 Renders are supersampled 2x by default for anti-aliasing (`--ss` / the AA
 select in the UI; use 1x for quick drafts or reaction_diffusion, whose sim
@@ -165,8 +180,11 @@ material + ramp, so it reads as one coherent panel, not a four-image collage.
 Dials: `mix_truchet` / `mix_face` / `mix_silicon` / `mix_pcb` (bias 0 = off),
 `mix_sharp` (border hardness), `mix_scale` (region size) — all breedable, so you
 can evolve toward "more silicon, less truchet". Fusing 2–4 full generators is
-costly, so the mixer caps its internal work at 512px and upscales (it's soft by
-nature); ~10–15s/tile. Best rendered at AA 1×.
+costly, so the mixer caps its internal work at 512px (`_MAX_RES`) and renders
+there **natively** — no supersample, no upscale — so edges stay hard/aliased and
+the detail is dense, not blurred (~12s/tile). It doesn't benefit from AA, so
+render at 512px. For hard tiles larger than 512, raise `_MAX_RES` (cost grows
+with area).
 
 ### The stamp family (glyphs + your own images)
 

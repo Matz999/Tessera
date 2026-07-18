@@ -16,7 +16,7 @@ and apply once to the fused result.
 import numpy as np
 
 from ..core.noise import fbm
-from ..core.util import downscale, norm01, rng_for
+from ..core.util import norm01, rng_for
 from . import face, pcb, silicon, truchet
 from .common import render_material, sample_common
 
@@ -62,8 +62,8 @@ def sample_params(rng) -> dict:
     if sum(p["mix_" + n] > 0 for n in _NAMES) < 2:      # guarantee a real mix
         for n in list(rng.permutation(_NAMES))[:2]:
             p["mix_" + n] = 1.0
-    p["mix_sharp"] = round(float(u(1.5, 4.0)), 3)
-    p["mix_scale"] = round(float(rng.choice([1.0, 1.5, 2.0, 3.0])), 3)
+    p["mix_sharp"] = round(float(u(3.0, 7.0)), 3)          # harder region borders
+    p["mix_scale"] = round(float(rng.choice([2.0, 3.0, 4.0, 5.0])), 3)  # busier
     p["material"] = str(rng.choice(["stone", "bronze", "ceramic"]))
     p["ramp"] = str(rng.choice(["gold_indigo", "lapis_gold", "terracotta", "celadon",
                                 "obsidian", "biolum", "iridescent", "amethyst"]))
@@ -75,8 +75,11 @@ def sample_params(rng) -> dict:
 
 
 def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np.ndarray:
-    out_size = size
-    size = min(size, _MAX_RES)          # bound the multi-generator cost
+    # Bound the multi-generator cost, but render at native resolution and return
+    # it as-is — no upscale round-trip. render_batch's ss-downscale then either
+    # no-ops (output == cap) or genuinely downsamples, so edges stay hard/aliased
+    # instead of blurred. (Wildcard is best at AA 1x; it does not supersample.)
+    size = min(size, _MAX_RES)
     rng = rng_for(seed)
     active = [(n, _SUBS[n], float(params.get("mix_" + n, 1.0)))
               for n in _NAMES if float(params.get("mix_" + n, 1.0)) > 0]
@@ -118,7 +121,6 @@ def generate(seed: int, params: dict, size: int = 512, gray: bool = False) -> np
     if emit_src is None and float(params.get("emission", 0.0)) > 0:
         rp = {**params, "emission": 0.0}   # no emitter present -> don't glow the
         #                                    dark ground (invert_tone -> white)
-    img = render_material(norm01(H), norm01(T), rp, rng, gray,
-                          spec_mask=np.clip(S, 0.02, 1.0), ao_radii=(3, 8, 18),
-                          emit_source=emit_src)
-    return downscale(img, out_size) if out_size != size else img
+    return render_material(norm01(H), norm01(T), rp, rng, gray,
+                           spec_mask=np.clip(S, 0.02, 1.0), ao_radii=(3, 8, 18),
+                           emit_source=emit_src)
